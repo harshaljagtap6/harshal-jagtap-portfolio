@@ -14,6 +14,8 @@ export const metadata: Metadata = {
   description: "Portfolio of Harshal Jagtap, Unity Game Developer specializing in gameplay systems, AI behavior, and high-performance mobile games.",
 };
 
+import { Analytics } from "@vercel/analytics/react";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,6 +27,7 @@ export default function RootLayout({
         <Navbar />
         <main className="flex-1">{children}</main>
         <Footer />
+        <Analytics />
       </body>
     </html>
   );
