@@ -1,14 +1,49 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #0f172a;
+  --color-background: #0a0a0c;
   --color-foreground: #f8fafc;
-  --color-primary: #38bdf8;
-  --color-primary-dark: #0284c7;
-  --color-card: #1e293b;
+  --color-primary: var(--theme-primary);
+  --color-primary-dark: #0088cc;
+  --color-secondary: var(--theme-secondary);
+  --color-card: #121217;
   --color-card-foreground: #f1f5f9;
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-orbitron: var(--font-orbitron), sans-serif;
+  --font-share-mono: var(--font-share-tech-mono), monospace;
+}
+
+:root {
+  /* Common transitions */
+  --transition-theme: background-color 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
+}
+
+/* Theme variable bindings based on role */
+body[data-role="game"] {
+  --theme-primary: #00f0ff;          /* Cyan */
+  --theme-secondary: #bd00ff;        /* Neon Purple/Magenta */
+  --theme-bg: #050508;               /* Cyberpunk pitch black */
+  --theme-card: rgba(16, 16, 24, 0.65);
+  --theme-border: rgba(0, 240, 255, 0.2);
+  --theme-border-hover: rgba(189, 0, 255, 0.5);
+  --theme-glow: 0 0 15px rgba(0, 240, 255, 0.25);
+  --theme-glow-strong: 0 0 25px rgba(0, 240, 255, 0.5);
+  --theme-font-title: var(--font-orbitron);
+  --theme-selection-bg: rgba(0, 240, 255, 0.3);
+}
+
+body[data-role="ai"] {
+  --theme-primary: #10b981;          /* Emerald Green */
+  --theme-secondary: #3b82f6;        /* Electric Blue */
+  --theme-bg: #030712;               /* Obsidian/Dark slate */
+  --theme-card: rgba(15, 23, 42, 0.6);
+  --theme-border: rgba(16, 185, 129, 0.2);
+  --theme-border-hover: rgba(59, 130, 246, 0.5);
+  --theme-glow: 0 0 15px rgba(16, 185, 129, 0.2);
+  --theme-glow-strong: 0 0 25px rgba(16, 185, 129, 0.45);
+  --theme-font-title: var(--font-share-mono);
+  --theme-selection-bg: rgba(16, 185, 129, 0.25);
 }
 
 @layer base {
@@ -16,13 +51,130 @@
     scroll-behavior: smooth;
   }
   body {
-    background-color: var(--color-background);
+    background-color: var(--theme-bg, #0a0a0c);
     color: var(--color-foreground);
-    @apply font-sans;
+    font-family: var(--font-sans);
+    transition: var(--transition-theme);
+    overflow-x: hidden;
   }
 }
 
+/* Custom background patterns */
+.cyber-grid-bg {
+  background-image: linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+  background-position: center;
+}
+
+.ai-terminal-bg {
+  background-image: linear-gradient(rgba(16, 185, 129, 0.02) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(16, 185, 129, 0.02) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: center;
+}
+
+/* 3D Perspective Grid for Cyberpunk style */
+.grid-perspective {
+  perspective: 250px;
+  overflow: hidden;
+}
+
+.grid-perspective-lines {
+  background-image: linear-gradient(to right, rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+  transform: rotateX(65deg) scale(2);
+  transform-origin: top center;
+  animation: grid-scroll-anim 20s linear infinite;
+  box-shadow: inset 0 0 100px rgba(5, 5, 8, 1);
+}
+
+@keyframes grid-scroll-anim {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 800px;
+  }
+}
+
+/* Scanlines overlay */
+.scanlines-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.25) 50%
+  ), linear-gradient(
+    90deg, 
+    rgba(255, 0, 0, 0.04), 
+    rgba(0, 255, 0, 0.01), 
+    rgba(0, 0, 255, 0.04)
+  );
+  background-size: 100% 4px, 6px 100%;
+  opacity: 0.15;
+  z-index: 10;
+}
+
+/* Glow Utilities */
+.box-glow {
+  box-shadow: var(--theme-glow);
+  transition: var(--transition-theme);
+}
+
+.box-glow:hover {
+  box-shadow: var(--theme-glow-strong);
+}
+
+/* Font helpers */
+.font-theme-title {
+  font-family: var(--theme-font-title), var(--font-sans);
+}
+
+/* Pixel corner decoration for Game UI cards */
+.pixel-corners {
+  position: relative;
+}
+
+.pixel-corners::before,
+.pixel-corners::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: var(--theme-primary);
+  border-style: solid;
+  pointer-events: none;
+  z-index: 5;
+  transition: var(--transition-theme);
+}
+
+.pixel-corners::before {
+  top: -1px;
+  left: -1px;
+  border-width: 2px 0 0 2px;
+}
+
+.pixel-corners::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 2px 2px 0;
+}
+
+/* Matrix terminal text scan animations */
+@keyframes text-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.terminal-cursor {
+  animation: text-blink 1s step-end infinite;
+}
+
+/* Smooth custom selection styling */
 ::selection {
-  background: rgba(56, 189, 248, 0.3);
-  color: #fff;
+  background: var(--theme-selection-bg);
+  color: #ffffff;
 }
