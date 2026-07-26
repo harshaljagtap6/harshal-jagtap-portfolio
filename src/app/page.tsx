@@ -6,6 +6,8 @@ import Experience from "@/components/sections/Experience";
 import Projects from "@/components/sections/Projects";
 import ResumeCenter from "@/components/sections/ResumeCenter";
 import Contact from "@/components/sections/Contact";
+import AICanvas from "@/components/canvas/AICanvas";
+import GameCanvas from "@/components/canvas/GameCanvas";
 import { useRole } from "./providers";
 
 export default function Home() {
@@ -43,6 +45,11 @@ export default function Home() {
         </div>
       )}
 
+      {/* Dynamic Interactive Canvas Overlays */}
+      {role === "game" && <GameCanvas />}
+      {role === "ai" && <AICanvas />}
+
+      {/* Page Content */}
       <div className="relative z-10">
         <Hero />
         <Skills />
