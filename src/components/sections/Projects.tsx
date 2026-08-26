@@ -48,7 +48,7 @@ const gameProjects = [
     metric: "1:1 Interactive CAD Simulation",
     iconType: "industrial",
     action: "LAUNCH DEMO",
-    link: "https://github.com/harshaljagtap6"
+    link: "https://prod-config.harshaljagtap.tech"
   },
   {
     title: "Sorting3DGame",
