@@ -1,6 +1,11 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
+import {
+  isCoarsePointer,
+  isInteractiveTarget,
+  prefersReducedMotion,
+} from "./canvasEnv";
 
 interface Laser {
   x: number;
@@ -11,7 +16,8 @@ interface Laser {
   targetY: number;
   distanceTraveled: number;
   totalDistance: number;
-  color: string;
+  /** "r, g, b" triplet, so per-frame alpha strings need no colour parsing. */
+  rgb: string;
 }
 
 interface Spark {
@@ -22,7 +28,7 @@ interface Spark {
   radius: number;
   alpha: number;
   decay: number;
-  color: string;
+  rgb: string;
 }
 
 interface Enemy {
@@ -36,12 +42,15 @@ interface Enemy {
   swingOffset: number;
 }
 
+const CYAN_RGB = "0, 240, 255";
+const PURPLE_RGB = "189, 0, 255";
+
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouseRef = useRef({ x: 0, y: 0 });
   const recoilRef = useRef(0);
   const flashTimerRef = useRef(0);
-  
+
   // Game session refs (to read inside animation loop safely)
   const scoreRef = useRef(0);
   const highScoreRef = useRef(0);
@@ -63,19 +72,35 @@ export default function GameCanvas() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let animationFrameId: number;
-    let lasers: Laser[] = [];
-    let sparks: Spark[] = [];
-    let enemies: Enemy[] = [];
+    const reducedMotion = prefersReducedMotion();
+    const coarsePointer = isCoarsePointer();
+
+    // Touch devices can't hover to aim, so they get fewer particles too.
+    const sparkScale = coarsePointer ? 0.5 : 1;
+    const maxSparks = coarsePointer ? 90 : 220;
+    const maxLasers = coarsePointer ? 12 : 30;
+
+    let animationFrameId = 0;
+    let resizeFrameId = 0;
+    const lasers: Laser[] = [];
+    const sparks: Spark[] = [];
+    const enemies: Enemy[] = [];
     let nextEnemyId = 0;
 
-    const resizeCanvas = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+    const applyResize = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      if (width === canvas.width && height === canvas.height) return;
+      canvas.width = width;
+      canvas.height = height;
     };
 
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
+    applyResize();
+
+    // Aim at the middle of the screen until the pointer says otherwise.
+    // Without this the stickman spends every touch session aiming at 0,0.
+    mouseRef.current.x = canvas.width / 2;
+    mouseRef.current.y = canvas.height / 2;
 
     // Track mouse coordinates globally
     const handleMouseMove = (e: MouseEvent) => {
@@ -85,6 +110,14 @@ export default function GameCanvas() {
 
     // Fire laser bullet on click
     const handleMouseClick = (e: MouseEvent) => {
+      // The listener is on window, so without this a tap on a nav link or the
+      // Unity canvas would also fire a shot underneath it.
+      if (isInteractiveTarget(e.target)) return;
+
+      // A tap has no hover, so the tap point is also the aim point.
+      mouseRef.current.x = e.clientX;
+      mouseRef.current.y = e.clientY;
+
       const screenWidth = window.innerWidth;
       const screenHeight = window.innerHeight;
 
@@ -121,20 +154,28 @@ export default function GameCanvas() {
         targetY: e.clientY,
         distanceTraveled: 0,
         totalDistance: dist,
-        color: Math.random() > 0.5 ? "#00f0ff" : "#bd00ff" // Cyan or Purple
+        rgb: Math.random() > 0.5 ? CYAN_RGB : PURPLE_RGB // Cyan or Purple
       });
+
+      // Discard the oldest shot rather than letting a held-down click grow
+      // the array without bound.
+      if (lasers.length > maxLasers) lasers.shift();
 
       // Apply recoil physics push
       recoilRef.current = 15;
       flashTimerRef.current = 4; // Muzzle flash frames
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("click", handleMouseClick);
-
     // Spawn sparks on impact or death
-    const spawnImpactSparks = (x: number, y: number, color: string, count = 8, isLarge = false) => {
-      for (let i = 0; i < count; i++) {
+    const spawnImpactSparks = (
+      x: number,
+      y: number,
+      rgb: string,
+      count = 8,
+      isLarge = false
+    ) => {
+      const scaled = Math.max(3, Math.round(count * sparkScale));
+      for (let i = 0; i < scaled; i++) {
         const angle = Math.random() * Math.PI * 2;
         const speed = Math.random() * (isLarge ? 6 : 4) + (isLarge ? 3 : 2);
         sparks.push({
@@ -145,18 +186,21 @@ export default function GameCanvas() {
           radius: Math.random() * (isLarge ? 3 : 2) + 1,
           alpha: 1,
           decay: Math.random() * 0.03 + 0.015,
-          color
+          rgb
         });
       }
+      // Drop the oldest particles once the cap is reached.
+      if (sparks.length > maxSparks) sparks.splice(0, sparks.length - maxSparks);
     };
 
-    // Draw Loop
-    const draw = () => {
+    // Draws one complete frame. Runs on a loop normally, or exactly once when
+    // the visitor has asked for reduced motion.
+    const drawFrame = (animate: boolean) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const screenWidth = canvas.width;
       const screenHeight = canvas.height;
-      gameFrameRef.current++;
+      if (animate) gameFrameRef.current++;
 
       // Ground level feet base y-coordinate
       const groundY = screenHeight - 120;
@@ -164,13 +208,13 @@ export default function GameCanvas() {
 
       // Red damage screen overlay
       if (damageFlashRef.current > 0) {
-        damageFlashRef.current--;
+        if (animate) damageFlashRef.current--;
         ctx.fillStyle = `rgba(239, 68, 68, ${0.12 * (damageFlashRef.current / 8)})`;
         ctx.fillRect(0, 0, screenWidth, screenHeight);
       }
 
       // Spawning enemies from left side (approx every 3 seconds)
-      if (gameFrameRef.current % 180 === 0 && enemies.length < 5) {
+      if (animate && gameFrameRef.current % 180 === 0 && enemies.length < 5) {
         enemies.push({
           x: -30,
           y: groundY,
@@ -195,58 +239,45 @@ export default function GameCanvas() {
 
       // Recoil dampening
       const recoilOffset = recoilRef.current;
-      recoilRef.current *= 0.82;
+      if (animate) recoilRef.current *= 0.82;
+
+      ctx.lineCap = "round";
+
+      // Shooting Arm & Blaster (recoil shifts back along angle vector)
+      const handX =
+        shoulderX - Math.cos(angle) * recoilOffset * 0.45 + Math.cos(angle) * 22;
+      const handY =
+        shoulderY - Math.sin(angle) * recoilOffset * 0.45 + Math.sin(angle) * 22;
+
+      // The whole figure goes into one path, then gets stroked twice: a wide
+      // faint pass for the glow and a crisp pass on top. That replaces the old
+      // per-limb shadowBlur, which was by far the most expensive call here.
+      const player = new Path2D();
+      player.moveTo(shoulderX + headRadius, shoulderY - headRadius - 8);
+      player.arc(shoulderX, shoulderY - headRadius - 8, headRadius, 0, Math.PI * 2);
+      player.moveTo(shoulderX, shoulderY - 8); // Spine
+      player.lineTo(hipsX, hipsY);
+      player.moveTo(hipsX, hipsY); // Left Leg
+      player.lineTo(playerX - 12, groundY);
+      player.moveTo(hipsX, hipsY); // Right Leg
+      player.lineTo(playerX + 12, groundY);
+      player.moveTo(shoulderX, shoulderY); // Left Arm (supporting)
+      player.lineTo(shoulderX - 12, shoulderY + 12);
+      player.moveTo(shoulderX, shoulderY); // Shooting Arm
+      player.lineTo(handX, handY);
+
+      ctx.strokeStyle = `rgba(${CYAN_RGB}, 0.18)`;
+      ctx.lineWidth = 9;
+      ctx.stroke(player);
 
       ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
       ctx.lineWidth = 3.5;
-      ctx.lineCap = "round";
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = "rgba(0, 240, 255, 0.4)";
-
-      // Draw Head
-      ctx.beginPath();
-      ctx.arc(shoulderX, shoulderY - headRadius - 8, headRadius, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Spine
-      ctx.beginPath();
-      ctx.moveTo(shoulderX, shoulderY - 8);
-      ctx.lineTo(hipsX, hipsY);
-      ctx.stroke();
-
-      // Left Leg
-      ctx.beginPath();
-      ctx.moveTo(hipsX, hipsY);
-      ctx.lineTo(playerX - 12, groundY);
-      ctx.stroke();
-
-      // Right Leg
-      ctx.beginPath();
-      ctx.moveTo(hipsX, hipsY);
-      ctx.lineTo(playerX + 12, groundY);
-      ctx.stroke();
-
-      // Left Arm (supporting)
-      ctx.beginPath();
-      ctx.moveTo(shoulderX, shoulderY);
-      ctx.lineTo(shoulderX - 12, shoulderY + 12);
-      ctx.stroke();
-
-      // Shooting Arm & Blaster (recoil shifts back along angle vector)
-      const handX = shoulderX - Math.cos(angle) * recoilOffset * 0.45 + Math.cos(angle) * 22;
-      const handY = shoulderY - Math.sin(angle) * recoilOffset * 0.45 + Math.sin(angle) * 22;
-
-      ctx.beginPath();
-      ctx.moveTo(shoulderX, shoulderY);
-      ctx.lineTo(handX, handY);
-      ctx.stroke();
+      ctx.stroke(player);
 
       // Blaster body
       ctx.save();
       ctx.translate(handX, handY);
       ctx.rotate(angle);
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = "#00f0ff";
       ctx.strokeStyle = "#00f0ff";
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -263,30 +294,32 @@ export default function GameCanvas() {
       ctx.stroke();
       ctx.restore();
 
-      // Draw Muzzle Flash
+      // Draw Muzzle Flash: faint wide disc under a white core, in place of
+      // the old shadowBlur bloom.
       if (flashTimerRef.current > 0) {
-        flashTimerRef.current--;
+        if (animate) flashTimerRef.current--;
         const barrelX = shoulderX + Math.cos(angle) * 32;
         const barrelY = shoulderY + Math.sin(angle) * 32;
+        const flashRadius = Math.random() * 8 + 5;
+
         ctx.beginPath();
-        ctx.arc(barrelX, barrelY, Math.random() * 8 + 5, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-        ctx.shadowBlur = 15;
-        ctx.shadowColor = "#00f0ff";
+        ctx.arc(barrelX, barrelY, flashRadius * 2.2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${CYAN_RGB}, 0.22)`;
         ctx.fill();
-        ctx.shadowBlur = 0;
+
+        ctx.beginPath();
+        ctx.arc(barrelX, barrelY, flashRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.fill();
       }
 
-      // 2. Update & Draw Enemies (Walking Stickmen in neon red/purple)
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(239, 68, 68, 0.95)"; // Neon Red Enemy
-      ctx.shadowColor = "rgba(239, 68, 68, 0.4)";
-
+      // 2. Update & Draw Enemies (Walking Stickmen in neon red)
+      const enemyPath = new Path2D();
       for (let i = enemies.length - 1; i >= 0; i--) {
         const enemy = enemies[i];
 
         // Walk towards player
-        enemy.x += enemy.speed;
+        if (animate) enemy.x += enemy.speed;
 
         // Walking cycle calculation for swing legs
         const walkCycle = (gameFrameRef.current + enemy.swingOffset) * 0.15;
@@ -297,93 +330,98 @@ export default function GameCanvas() {
         const enemyShoulderX = enemy.x;
         const enemyShoulderY = enemy.y - 35;
 
-        // Draw Enemy Head
-        ctx.beginPath();
-        ctx.arc(enemyShoulderX, enemyShoulderY - headRadius - 8, headRadius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Spine
-        ctx.beginPath();
-        ctx.moveTo(enemyShoulderX, enemyShoulderY - 8);
-        ctx.lineTo(enemyHipsX, enemyHipsY);
-        ctx.stroke();
-
-        // Swinging Leg 1
-        ctx.beginPath();
-        ctx.moveTo(enemyHipsX, enemyHipsY);
-        ctx.lineTo(enemy.x + swingAngle, enemy.y);
-        ctx.stroke();
-
-        // Swinging Leg 2
-        ctx.beginPath();
-        ctx.moveTo(enemyHipsX, enemyHipsY);
-        ctx.lineTo(enemy.x - swingAngle, enemy.y);
-        ctx.stroke();
-
-        // Swinging Arms (running/walking pose)
-        ctx.beginPath();
-        ctx.moveTo(enemyShoulderX, enemyShoulderY);
-        ctx.lineTo(enemy.x - swingAngle * 0.8, enemyShoulderY + 12);
-        ctx.stroke();
+        enemyPath.moveTo(enemyShoulderX + headRadius, enemyShoulderY - headRadius - 8);
+        enemyPath.arc(
+          enemyShoulderX,
+          enemyShoulderY - headRadius - 8,
+          headRadius,
+          0,
+          Math.PI * 2
+        );
+        enemyPath.moveTo(enemyShoulderX, enemyShoulderY - 8); // Spine
+        enemyPath.lineTo(enemyHipsX, enemyHipsY);
+        enemyPath.moveTo(enemyHipsX, enemyHipsY); // Swinging Leg 1
+        enemyPath.lineTo(enemy.x + swingAngle, enemy.y);
+        enemyPath.moveTo(enemyHipsX, enemyHipsY); // Swinging Leg 2
+        enemyPath.lineTo(enemy.x - swingAngle, enemy.y);
+        enemyPath.moveTo(enemyShoulderX, enemyShoulderY); // Swinging Arms
+        enemyPath.lineTo(enemy.x - swingAngle * 0.8, enemyShoulderY + 12);
 
         // Hitting the Player Base
         if (enemy.x >= playerX - 55) {
           // Trigger shield impact sparks
-          spawnImpactSparks(playerX - 30, groundY - 20, "#00f0ff", 15, false);
-          
+          spawnImpactSparks(playerX - 30, groundY - 20, CYAN_RGB, 15, false);
+
           // Apply damage flash and reset scoreboard
           damageFlashRef.current = 8;
           scoreRef.current = 0;
-          
+
           // Remove enemy
           enemies.splice(i, 1);
         }
       }
-      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = "rgba(239, 68, 68, 0.18)";
+      ctx.lineWidth = 8;
+      ctx.stroke(enemyPath);
+      ctx.strokeStyle = "rgba(239, 68, 68, 0.95)"; // Neon Red Enemy
+      ctx.lineWidth = 3;
+      ctx.stroke(enemyPath);
 
       // 3. Update & Draw Lasers & Collision Detections
-      ctx.lineWidth = 2.5;
+      // Trails are batched per colour so the whole volley is two strokes
+      // rather than a shadowBlur stroke per bullet.
+      const laserPaths = new Map<string, Path2D>();
+
       for (let i = lasers.length - 1; i >= 0; i--) {
         const laser = lasers[i];
         const prevX = laser.x;
         const prevY = laser.y;
 
-        laser.x += laser.vx;
-        laser.y += laser.vy;
-        laser.distanceTraveled += Math.sqrt(laser.vx * laser.vx + laser.vy * laser.vy);
+        if (animate) {
+          laser.x += laser.vx;
+          laser.y += laser.vy;
+          laser.distanceTraveled += Math.sqrt(
+            laser.vx * laser.vx + laser.vy * laser.vy
+          );
+        }
 
         // Draw bullet trail line
-        ctx.beginPath();
-        ctx.moveTo(prevX, prevY);
-        ctx.lineTo(laser.x, laser.y);
-        ctx.strokeStyle = laser.color;
-        ctx.shadowBlur = 10;
-        ctx.shadowColor = laser.color;
-        ctx.stroke();
+        let path = laserPaths.get(laser.rgb);
+        if (!path) {
+          path = new Path2D();
+          laserPaths.set(laser.rgb, path);
+        }
+        path.moveTo(prevX, prevY);
+        path.lineTo(laser.x, laser.y);
 
         // Hit registration AABB checks
         let hitRegistered = false;
         for (let j = enemies.length - 1; j >= 0; j--) {
           const enemy = enemies[j];
-          
+
           // Enemy bounding box coordinates
           const leftBound = enemy.x - 15;
           const rightBound = enemy.x + 15;
           const topBound = enemy.y - 55;
           const bottomBound = enemy.y;
 
-          if (laser.x >= leftBound && laser.x <= rightBound && 
-              laser.y >= topBound && laser.y <= bottomBound) {
-            
+          if (
+            laser.x >= leftBound && laser.x <= rightBound &&
+            laser.y >= topBound && laser.y <= bottomBound
+          ) {
             // Spark explosion at enemy center
-            spawnImpactSparks(enemy.x, enemy.y - 25, laser.color, 18, true);
-            
+            spawnImpactSparks(enemy.x, enemy.y - 25, laser.rgb, 18, true);
+
             // Increment Score
             scoreRef.current += 100;
             if (scoreRef.current > highScoreRef.current) {
               highScoreRef.current = scoreRef.current;
               if (typeof window !== "undefined") {
-                localStorage.setItem("portfolio-shoot-highscore", highScoreRef.current.toString());
+                localStorage.setItem(
+                  "portfolio-shoot-highscore",
+                  highScoreRef.current.toString()
+                );
               }
             }
 
@@ -400,41 +438,47 @@ export default function GameCanvas() {
         }
 
         // Distance range checks
-        if (laser.distanceTraveled >= laser.totalDistance || 
-            laser.x < 0 || laser.x > screenWidth || 
-            laser.y < 0 || laser.y > screenHeight) {
-          
+        if (
+          laser.distanceTraveled >= laser.totalDistance ||
+          laser.x < 0 || laser.x > screenWidth ||
+          laser.y < 0 || laser.y > screenHeight
+        ) {
           // Draw standard impact sparks
-          spawnImpactSparks(laser.targetX, laser.targetY, laser.color, 8, false);
+          spawnImpactSparks(laser.targetX, laser.targetY, laser.rgb, 8, false);
           lasers.splice(i, 1);
         }
       }
-      ctx.shadowBlur = 0;
+
+      for (const [rgb, path] of laserPaths) {
+        ctx.strokeStyle = `rgba(${rgb}, 0.2)`;
+        ctx.lineWidth = 7;
+        ctx.stroke(path);
+        ctx.strokeStyle = `rgb(${rgb})`;
+        ctx.lineWidth = 2.5;
+        ctx.stroke(path);
+      }
 
       // 4. Draw sparks particles
       for (let i = sparks.length - 1; i >= 0; i--) {
         const spark = sparks[i];
-        spark.x += spark.vx;
-        spark.y += spark.vy;
-        spark.vy += 0.085; // Gravity
-        spark.alpha -= spark.decay;
+
+        if (animate) {
+          spark.x += spark.vx;
+          spark.y += spark.vy;
+          spark.vy += 0.085; // Gravity
+          spark.alpha -= spark.decay;
+        }
 
         if (spark.alpha <= 0) {
           sparks.splice(i, 1);
           continue;
         }
 
-        ctx.save();
-        ctx.globalAlpha = spark.alpha;
         ctx.beginPath();
         ctx.arc(spark.x, spark.y, spark.radius, 0, Math.PI * 2);
-        ctx.fillStyle = spark.color;
-        ctx.shadowBlur = 6;
-        ctx.shadowColor = spark.color;
+        ctx.fillStyle = `rgba(${spark.rgb}, ${spark.alpha})`;
         ctx.fill();
-        ctx.restore();
       }
-      ctx.shadowBlur = 0;
 
       // 5. Draw Retro Arcade Score HUD directly on canvas
       const hudX = Math.max(20, screenWidth - 320);
@@ -449,15 +493,41 @@ export default function GameCanvas() {
       // Score string drawing
       ctx.fillStyle = "#00f0ff";
       ctx.font = "bold 11px var(--font-orbitron), Orbitron, monospace";
-      ctx.shadowColor = "#00f0ff";
-      ctx.shadowBlur = 4;
-      
+
       const scoreStr = scoreRef.current.toString().padStart(5, "0");
       const highStr = highScoreRef.current.toString().padStart(5, "0");
       ctx.fillText(`SCORE: ${scoreStr}  |  BEST: ${highStr}`, hudX, hudY);
-      
-      ctx.shadowBlur = 0;
+    };
 
+    // Coalesced through one animation frame; resize fires in bursts.
+    const handleResize = () => {
+      cancelAnimationFrame(resizeFrameId);
+      resizeFrameId = requestAnimationFrame(() => {
+        applyResize();
+        // Resizing clears the canvas, and there is no loop to repaint it.
+        if (reducedMotion) drawFrame(false);
+      });
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    if (reducedMotion) {
+      // Static scene: the player stands ready, nothing animates.
+      drawFrame(false);
+      return () => {
+        cancelAnimationFrame(resizeFrameId);
+        window.removeEventListener("resize", handleResize);
+      };
+    }
+
+    if (!coarsePointer) {
+      window.addEventListener("mousemove", handleMouseMove);
+    }
+    window.addEventListener("click", handleMouseClick);
+
+    // Draw Loop
+    const draw = () => {
+      drawFrame(true);
       animationFrameId = requestAnimationFrame(draw);
     };
 
@@ -465,7 +535,8 @@ export default function GameCanvas() {
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", resizeCanvas);
+      cancelAnimationFrame(resizeFrameId);
+      window.removeEventListener("resize", handleResize);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("click", handleMouseClick);
     };
