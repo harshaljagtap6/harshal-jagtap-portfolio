@@ -8,6 +8,7 @@ import ResumeCenter from "@/components/sections/ResumeCenter";
 import Contact from "@/components/sections/Contact";
 import AICanvas from "@/components/canvas/AICanvas";
 import GameCanvas from "@/components/canvas/GameCanvas";
+import UnityPlayer from "@/components/sections/unityPlayer";
 import { useRole } from "./providers";
 
 export default function Home() {
@@ -55,6 +56,8 @@ export default function Home() {
         <Skills />
         <Experience />
         <Projects />
+        {/* The WebGL build is a Game Dev artefact; AI-mode visitors never pay for it. */}
+        {role === "game" && <UnityPlayer />}
         <ResumeCenter />
         <Contact />
       </div>
