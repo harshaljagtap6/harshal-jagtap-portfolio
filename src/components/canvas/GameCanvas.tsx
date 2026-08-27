@@ -45,6 +45,17 @@ interface Enemy {
 const CYAN_RGB = "0, 240, 255";
 const PURPLE_RGB = "189, 0, 255";
 
+/** One "step" is one frame at 60fps. All motion is expressed in these units. */
+const FRAME_MS = 1000 / 60;
+/**
+ * Cap on a single step, so a long frame can't teleport a laser straight
+ * through an enemy's hitbox. A slow device runs slightly slow rather than
+ * skipping collisions.
+ */
+const MAX_STEP = 2;
+/** Steps between enemy spawns: 180 at 60fps, i.e. every 3 seconds. */
+const SPAWN_INTERVAL_STEPS = 180;
+
 export default function GameCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouseRef = useRef({ x: 0, y: 0 });
@@ -86,6 +97,7 @@ export default function GameCanvas() {
     const sparks: Spark[] = [];
     const enemies: Enemy[] = [];
     let nextEnemyId = 0;
+    let spawnTimer = 0;
 
     const applyResize = () => {
       const width = window.innerWidth;
@@ -193,14 +205,15 @@ export default function GameCanvas() {
       if (sparks.length > maxSparks) sparks.splice(0, sparks.length - maxSparks);
     };
 
-    // Draws one complete frame. Runs on a loop normally, or exactly once when
-    // the visitor has asked for reduced motion.
-    const drawFrame = (animate: boolean) => {
+    // Draws one complete frame. `step` is elapsed time in 60fps frames, so
+    // motion is identical on a 60Hz and a 144Hz display. Runs on a loop
+    // normally, or exactly once when the visitor has asked for reduced motion.
+    const drawFrame = (animate: boolean, step: number) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const screenWidth = canvas.width;
       const screenHeight = canvas.height;
-      if (animate) gameFrameRef.current++;
+      if (animate) gameFrameRef.current += step;
 
       // Ground level feet base y-coordinate
       const groundY = screenHeight - 120;
@@ -208,23 +221,31 @@ export default function GameCanvas() {
 
       // Red damage screen overlay
       if (damageFlashRef.current > 0) {
-        if (animate) damageFlashRef.current--;
-        ctx.fillStyle = `rgba(239, 68, 68, ${0.12 * (damageFlashRef.current / 8)})`;
+        if (animate) damageFlashRef.current -= step;
+        ctx.fillStyle = `rgba(239, 68, 68, ${
+          0.12 * Math.max(damageFlashRef.current, 0) / 8
+        })`;
         ctx.fillRect(0, 0, screenWidth, screenHeight);
       }
 
       // Spawning enemies from left side (approx every 3 seconds)
-      if (animate && gameFrameRef.current % 180 === 0 && enemies.length < 5) {
-        enemies.push({
-          x: -30,
-          y: groundY,
-          speed: Math.random() * 0.45 + 0.75, // Walk speed
-          id: nextEnemyId++,
-          width: 24,
-          height: 55,
-          health: 1,
-          swingOffset: Math.random() * 100
-        });
+      if (animate) {
+        spawnTimer += step;
+        if (spawnTimer >= SPAWN_INTERVAL_STEPS) {
+          spawnTimer = 0;
+          if (enemies.length < 5) {
+            enemies.push({
+              x: -30,
+              y: groundY,
+              speed: Math.random() * 0.45 + 0.75, // Walk speed
+              id: nextEnemyId++,
+              width: 24,
+              height: 55,
+              health: 1,
+              swingOffset: Math.random() * 100
+            });
+          }
+        }
       }
 
       // 1. Draw Player Stickman
@@ -239,7 +260,7 @@ export default function GameCanvas() {
 
       // Recoil dampening
       const recoilOffset = recoilRef.current;
-      if (animate) recoilRef.current *= 0.82;
+      if (animate) recoilRef.current *= Math.pow(0.82, step);
 
       ctx.lineCap = "round";
 
@@ -297,7 +318,7 @@ export default function GameCanvas() {
       // Draw Muzzle Flash: faint wide disc under a white core, in place of
       // the old shadowBlur bloom.
       if (flashTimerRef.current > 0) {
-        if (animate) flashTimerRef.current--;
+        if (animate) flashTimerRef.current -= step;
         const barrelX = shoulderX + Math.cos(angle) * 32;
         const barrelY = shoulderY + Math.sin(angle) * 32;
         const flashRadius = Math.random() * 8 + 5;
@@ -319,7 +340,7 @@ export default function GameCanvas() {
         const enemy = enemies[i];
 
         // Walk towards player
-        if (animate) enemy.x += enemy.speed;
+        if (animate) enemy.x += enemy.speed * step;
 
         // Walking cycle calculation for swing legs
         const walkCycle = (gameFrameRef.current + enemy.swingOffset) * 0.15;
@@ -379,11 +400,10 @@ export default function GameCanvas() {
         const prevY = laser.y;
 
         if (animate) {
-          laser.x += laser.vx;
-          laser.y += laser.vy;
-          laser.distanceTraveled += Math.sqrt(
-            laser.vx * laser.vx + laser.vy * laser.vy
-          );
+          laser.x += laser.vx * step;
+          laser.y += laser.vy * step;
+          laser.distanceTraveled +=
+            Math.sqrt(laser.vx * laser.vx + laser.vy * laser.vy) * step;
         }
 
         // Draw bullet trail line
@@ -463,10 +483,10 @@ export default function GameCanvas() {
         const spark = sparks[i];
 
         if (animate) {
-          spark.x += spark.vx;
-          spark.y += spark.vy;
-          spark.vy += 0.085; // Gravity
-          spark.alpha -= spark.decay;
+          spark.x += spark.vx * step;
+          spark.y += spark.vy * step;
+          spark.vy += 0.085 * step; // Gravity
+          spark.alpha -= spark.decay * step;
         }
 
         if (spark.alpha <= 0) {
@@ -505,7 +525,7 @@ export default function GameCanvas() {
       resizeFrameId = requestAnimationFrame(() => {
         applyResize();
         // Resizing clears the canvas, and there is no loop to repaint it.
-        if (reducedMotion) drawFrame(false);
+        if (reducedMotion) drawFrame(false, 0);
       });
     };
 
@@ -513,7 +533,7 @@ export default function GameCanvas() {
 
     if (reducedMotion) {
       // Static scene: the player stands ready, nothing animates.
-      drawFrame(false);
+      drawFrame(false, 0);
       return () => {
         cancelAnimationFrame(resizeFrameId);
         window.removeEventListener("resize", handleResize);
@@ -526,12 +546,16 @@ export default function GameCanvas() {
     window.addEventListener("click", handleMouseClick);
 
     // Draw Loop
-    const draw = () => {
-      drawFrame(true);
+    let lastTimestamp = 0;
+    const draw = (timestamp: number) => {
+      // The very first frame has no predecessor; assume a nominal 60fps step.
+      const elapsed = lastTimestamp ? timestamp - lastTimestamp : FRAME_MS;
+      lastTimestamp = timestamp;
+      drawFrame(true, Math.min(elapsed / FRAME_MS, MAX_STEP));
       animationFrameId = requestAnimationFrame(draw);
     };
 
-    draw();
+    animationFrameId = requestAnimationFrame(draw);
 
     return () => {
       cancelAnimationFrame(animationFrameId);
