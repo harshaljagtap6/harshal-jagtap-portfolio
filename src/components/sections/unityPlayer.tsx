@@ -22,10 +22,12 @@ export default function UnityPlayer() {
 		const el = sectionRef.current;
 		if (!el) return;
 
-		// No observer support: fall back to loading immediately rather than never.
+		// No observer support: fall back to loading immediately rather than
+		// never. Deferred by a tick so this isn't a synchronous setState in an
+		// effect body.
 		if (typeof IntersectionObserver === "undefined") {
-			setShouldLoad(true);
-			return;
+			const timer = setTimeout(() => setShouldLoad(true), 0);
+			return () => clearTimeout(timer);
 		}
 
 		const observer = new IntersectionObserver(
