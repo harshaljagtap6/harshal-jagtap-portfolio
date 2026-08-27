@@ -1,0 +1,78 @@
+Phase 0 — Baseline and safeguards
+1. Record current mobile and desktop Lighthouse results: LCP, INP, CLS, transfer size, CPU time, and frame rate.
+2. Preserve the existing dirty worktree; make each phase a separate commit.
+3. Define acceptance checks for both Game Dev and AI modes:
+   - Mode persistence still works.
+   - Canvas interactions still work on page background.
+   - Navigation, forms, downloads, and Unity interaction do not trigger canvas effects.
+   - Unity remains fully playable.
+Phase 1 — Defer Unity without removing it
+Files: [page.tsx (line 59)](/D:/WebProjects/HarshalPortfolio/portfolio/src/app/page.tsx:59), [unityPlayer.tsx (line 7)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/sections/unityPlayer.tsx:7)
+1. Dynamically import UnityPlayer with SSR disabled.
+2. Use IntersectionObserver to begin importing/loading when the Unity section is within roughly 600px of view.
+3. Keep the current loading-progress UI; show it while the player module and Unity files load.
+4. Unload or pause the Unity instance when far off-screen only if the Unity library supports it safely; otherwise retain it once loaded.
+5. Verify a fast scroll still shows a loading state rather than a blank player.
+Success criterion: initial page load makes no Unity .wasm, .data, or framework request until the Unity section is approached.
+Phase 2 — Optimize the Unity WebGL artifact
+Prerequisite: the original Unity project is needed; this repository contains only the exported build.
+1. Make a production WebGL build with Brotli compression.
+2. Enable managed/code stripping, disable development-build diagnostics, and remove unused assets/packages after Unity Profiler verification.
+3. Review texture formats, audio compression, shader variants, lightmaps, and included scenes.
+4. Move optional content to Addressables only where it is genuinely nonessential at initial launch.
+5. Publish each export under a versioned folder, such as /unity-build/<build-id>/.
+6. Configure CDN/Next headers:
+   - immutable caching for versioned Unity assets;
+   - correct Content-Encoding: br and MIME types for compressed files.
+Success criterion: repeat visits retrieve Unity primarily from cache, and compressed transfer is materially lower than the current 65.9 MiB raw build.
+Phase 3 — Make canvas effects battery- and CPU-aware
+Files: [GameCanvas.tsx (line 51)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/canvas/GameCanvas.tsx:51), [AICanvas.tsx (line 41)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/canvas/AICanvas.tsx:41)
+1. Add a shared visibility lifecycle:
+   - stop animation loops when document.hidden;
+   - resume cleanly when visible;
+   - respect prefers-reduced-motion with a static visual fallback.
+2. Convert GameCanvas frame-based movement/spawning to delta-time calculations before applying any FPS cap. This prevents a 30 FPS device from changing game speed.
+3. Cap particles, lasers, signals, and temporary nodes; discard oldest effects once the cap is reached.
+4. Ignore events originating from links, buttons, inputs, the Unity canvas, and other interactive controls. Background clicks retain current canvas interaction.
+5. Throttle resize handling through one animation-frame callback.
+6. Add adaptive quality:
+   - lower node count and digital-rain density on small/mobile screens;
+   - use a lower animation rate only after delta-time conversion.
+Success criterion: background visuals remain visually equivalent, but no longer consume meaningful CPU in a hidden tab or during regular UI interaction.
+Phase 4 — Optimize the AI network renderer
+File: [AICanvas.tsx (line 250)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/canvas/AICanvas.tsx:250)
+1. Replace per-frame node-pair calculations with a cached connection list, refreshed about 8–12 times per second.
+2. Compare squared distances rather than calling Math.sqrt for every pair.
+3. Maintain a node-id map so traveling signals do not call nodes.find() every frame.
+4. Use mobile quality tiers, such as 40–50 nodes instead of the current desktop-oriented count.
+5. Profile before and after in Chrome Performance panel.
+Success criterion: reduced scripting time and stable frame pacing on mid-range mobile devices.
+Phase 5 — Image and rendering improvements
+Files: [Hero.tsx (line 302)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/sections/Hero.tsx:302), [Projects.tsx (line 120)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/sections/Projects.tsx:120)
+1. Replace raw <img> tags with next/image.
+2. Use priority only for the above-fold profile image.
+3. Lazy-load below-fold project art and add accurate sizes values.
+4. Retain all image URLs and existing visual layouts using fill within the current aspect-ratio containers.
+5. Check image optimization support on the deployment host; install/configure sharp if self-hosting requires it.
+6. Run a bundle analysis before changing animation libraries or component boundaries; only split code where it measurably improves initial JS.
+Success criterion: below-fold images do not compete with the initial viewport for bandwidth.
+Phase 6 — CSS and scrolling work
+Files: [globals.css (line 97)](/D:/WebProjects/HarshalPortfolio/portfolio/src/app/globals.css:97), [Navbar.tsx (line 20)](/D:/WebProjects/HarshalPortfolio/portfolio/src/components/layout/Navbar.tsx:20)
+1. Add mobile/reduced-motion rules that tone down the largest blur and backdrop-filter layers while retaining the same design language.
+2. Use content-visibility: auto with an intrinsic size for suitable below-fold static sections.
+3. Make the navbar scroll listener passive and update state only when the threshold state actually changes.
+4. Verify no layout shift, visual regressions, or reduced text readability in either role.
+Phase 7 — Code quality and validation
+Files: [eslint.config.mjs (line 5)](/D:/WebProjects/HarshalPortfolio/portfolio/eslint.config.mjs:5), [providers.tsx (line 14)](/D:/WebProjects/HarshalPortfolio/portfolio/src/app/providers.tsx:14)
+1. Exclude generated public/unity-build/** JavaScript from ESLint.
+2. Fix the eight source lint errors and twelve warnings:
+   - replace immutable let arrays with const;
+   - remove unused imports;
+   - escape JSX apostrophes;
+   - replace the provider’s synchronous effect state update with a hydration-safe external-store or persisted-state approach.
+3. Run:
+   - npm run lint
+   - npm run build
+   - manual regression tests in both modes
+   - Lighthouse desktop and mobile comparison
+The recommended execution order is Phases 1, 3, and 4 first; they will deliver the largest performance improvement while preserving the site’s existing experience.
