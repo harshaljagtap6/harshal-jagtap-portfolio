@@ -27,7 +27,7 @@ const gameProjects = [
     metric: "40% Draw Call Reduction",
     image: "https://play-lh.googleusercontent.com/R3rjeaE1Ptxt9l4Dn6yHlufeVVkPeogml70pOq3zqTJupv7f0Ko1B44fgbrav5unX2fvRQmjfuJRKQ3Xk1n8uw",
     action: "LAUNCH MISSION",
-    link: "https://play.google.com/store/apps/details?id=com.LLI.SkyVanguardWarplanesFury&hl=en-US"
+    link: "https://drive.google.com/file/d/1Lypf-jSNQBwXJVM8OjbzjkQ186v1Gxda/view?usp=sharing"
   },
   {
     title: "Donut Sort - 3D Casual Game",
@@ -58,7 +58,7 @@ const gameProjects = [
     metric: "Zero-latency Physics Mechanics",
     image: "https://play-lh.googleusercontent.com/zJqdlbx8MBjzyLfIw-hq3RQnfgsb4TCh-rbnBUAB4lnmhh_kW82ujcOtKEwZoHYmNrS6",
     action: "PLAY PUZZLE",
-    link: "https://play.google.com/store/apps/details?id=com.lli.sugarCubeSorter&hl=en-US"
+    link: "https://drive.google.com/file/d/1F3YMUVgMDV8R0yKG6xjoLdogy9RrSc2A/view?usp=sharing"
   }
 ];
 
